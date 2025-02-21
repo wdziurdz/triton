@@ -249,10 +249,8 @@ void GatherOpConversion::emitThreadLocalGather(
 
     // Combine the computed column with the data-dependent gather index.
     column.emplace_back(kGatherDim, convertIndexToI32(loc, idxVal, rewriter));
-    SmallVector<std::pair<StringAttr, Value>> srcReg =
-        applyLinearLayout(loc, rewriter, invSrcLayout, column);
-
-    auto [srcRegName, srcReg] = srcReg.front();
+    auto [srcRegName, srcReg] =
+        applyLinearLayout(loc, rewriter, invSrcLayout, column).front();
     assert(srcRegName == kRegister);
 
     assert(!srcValues.empty() && "can't gather from an empty tensor");
