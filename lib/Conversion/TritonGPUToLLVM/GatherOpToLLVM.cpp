@@ -27,6 +27,8 @@ private:
   // selecting from them.
   void emitWarpLocalGather(GatherOp op, OpAdaptor adaptor,
                            ConversionPatternRewriter &rewriter) const;
+  void emitThreadLocalGather(GatherOp op, OpAdaptor adaptor,
+                             ConversionPatternRewriter &rewriter) const;
 
   const TargetInfoBase &targetInfo;
 };
@@ -40,7 +42,9 @@ GatherOpConversion::matchAndRewrite(GatherOp op, OpAdaptor adaptor,
   // memory with zero bank conflicts, we will need a more precise heuristic to
   // choose between the two codegen paths and rely on the middle end to pick the
   // right layout.
-  if (helper.isWarpLocal()) {
+  if (helper.isThreadLocal()) {
+    emitThreadLocalGather(op, adaptor, rewriter);
+  } else if (helper.isWarpLocal()) {
     emitWarpLocalGather(op, adaptor, rewriter);
   } else {
     emitGatherInShared(op, adaptor, rewriter);
@@ -133,6 +137,147 @@ void GatherOpConversion::emitGatherInShared(
   Value packed =
       packLLElements(loc, getTypeConverter(), results, rewriter, dstType);
   rewriter.replaceOp(op, packed);
+}
+
+void GatherOpConversion::emitThreadLocalGather(
+    GatherOp op, OpAdaptor adaptor, ConversionPatternRewriter &rewriter) const {
+  MLIRContext *ctx = op.getContext();
+  Location loc = op.getLoc();
+  auto b = TritonLLVMOpBuilder(loc, rewriter);
+  RankedTensorType srcType = op.getSrc().getType();
+  RankedTensorType idxType = op.getIndices().getType();
+
+  // Layout dimension names.
+  StringAttr kBlock = str_attr("block");
+  StringAttr kWarp = str_attr("warp");
+  StringAttr kLane = str_attr("lane");
+  StringAttr kRegister = str_attr("register");
+  StringAttr kGatherDim = rewriter.getStringAttr("dim" + Twine(op.getAxis()));
+  SmallVector<StringAttr> allDims, otherDims;
+  for (unsigned dim = 0, rank = srcType.getRank(); dim < rank; ++dim) {
+    allDims.push_back(str_attr("dim" + Twine(dim)));
+    if (dim != op.getAxis()) {
+      otherDims.push_back(allDims.back());
+    }
+  }
+
+  // Compute the src and idx layouts.
+  LinearLayout srcLayout =
+      toLinearLayout(srcType.getShape(), srcType.getEncoding());
+  LinearLayout idxLayout =
+      toLinearLayout(idxType.getShape(), idxType.getEncoding());
+
+  // Let `ll_src` be the source layout and `ll_idx` be the index layout.
+  // Let `src_col` be a tuple of dimensions except the gather dimension,
+  // representing a specific column in the source tensor. Likewise for
+  // `idx_col`. Let `src_idx` be the index into gather dimension in the source
+  // tensor.
+  //
+  // `(src_lane, src_reg) = ll_src^-1(src_col, src_idx)`, where `src_lane` is
+  // the thread that contains the required element and `src_reg` is the register
+  // within that thread.
+  //
+  // Because `ll_src(block=0, warp=0, lane=0)[otherDims] ==
+  // ll_idx(0, 0, 0)[otherDims]`, we know given any `idx_reg` (element in the
+  // index tensor) the thread will need to read from the same column in the
+  // source tensor.
+  //
+  // Thus, we can obtain
+  //
+  //   (src_lane, src_reg) = (ll_src^-1)(
+  //       ll_idx(black, warp, lane, idx_reg)[otherDims],
+  //       idxValues[idx_reg]
+  //   )[{"lane", "register"}]
+  //
+  // And the mapping will be the correct for each thread.
+  //
+  // Given `src_reg \in [0, K*N)`, we just need to emit N index shuffles for
+  // each `idx_reg` (the number of index shuffles is quadratic!) and
+  // `llvm.select` using `src_reg` to get the right one. `K` is the number of
+  // elements per column owned by a thread.
+
+  // Invert the source layout. It doesn't matter whether it is fully invertible
+  // with respect to anything except the register input dimension, since we know
+  // those don't vary in ways that matter for codegen.
+  LinearLayout invSrcLayout = srcLayout.pseudoinvert();
+
+  // Sanity check: the warp must be invariant to the index because otherwise the
+  // gather would need to read across warps!
+  assert(invSrcLayout.sublayoutIsZero(kGatherDim, {kBlock, kWarp, kLane}) &&
+         "expected a warp-local gather");
+  invSrcLayout = invSrcLayout.sublayout(allDims, {kRegister});
+
+  LinearLayout idxColLayout =
+      idxLayout.sublayout({kBlock, kWarp, kLane, kRegister}, otherDims);
+
+  SmallVector<Value> srcValues =
+      unpackLLElements(loc, adaptor.getSrc(), rewriter);
+  SmallVector<Value> idxValues =
+      unpackLLElements(loc, adaptor.getIndices(), rewriter);
+
+  auto [laneId, warpId] =
+      getLaneAndWarpId(rewriter, loc, srcLayout.getInDimSize(kLane));
+  Value blockId = targetInfo.getClusterCTAId(rewriter, loc);
+
+  unsigned /*N=*/srcRegsPerThread = srcLayout.getInDimSize(kRegister);
+  assert(srcRegsPerThread == srcValues.size());
+
+  LinearLayout invertSrcRegMap = invSrcLayout.sublayout(allDims, {kRegister});
+  invertSrcRegMap = invertSrcRegMap.removeZeroBasesAlongDim(kGatherDim);
+  unsigned numRegsPerColumn = invertSrcRegMap.getInDimSize(kGatherDim);
+  LinearLayout idxRegToCol = idxLayout.sublayout({kRegister}, otherDims);
+  // Now given `idx_reg`, we can compute the column it belongs to in both src
+  // and index tensors, then partially apply `invertSrcRegMap` with this to
+  // obtain a function that outputs the corresponding registers in the src
+  // tensor in the same column.
+
+  // L(column, i) = L(column, 0) xor L(0, i)
+  LinearLayout invertSrcRegMapColPart =
+      invertSrcRegMap.sublayout(otherDims, {kRegister});
+  LinearLayout invertSrcRegMapRest =
+      invertSrcRegMap.sublayout({kGatherDim}, {kRegister});
+
+  SmallVector<Value> results;
+  for (auto [idxReg, idxVal] : llvm::enumerate(idxValues)) {
+    SmallVector<std::pair<StringAttr, Value>> column =
+        applyLinearLayout(loc, rewriter, idxColLayout,
+                          {{kBlock, blockId},
+                           {kWarp, warpId},
+                           {kLane, laneId},
+                           {kRegister, b.i32_val(idxReg)}});
+    assert(column.size() == otherDims.size());
+
+    // Combine the computed column with the data-dependent gather index.
+    column.emplace_back(kGatherDim, convertIndexToI32(loc, idxVal, rewriter));
+    SmallVector<std::pair<StringAttr, Value>> srcReg =
+        applyLinearLayout(loc, rewriter, invSrcLayout, column);
+
+    auto [srcRegName, srcReg] = srcReg.front();
+    assert(srcRegName == kRegister);
+
+    assert(!srcValues.empty() && "can't gather from an empty tensor");
+
+    // Figure out which src registers we need to index shuffle from. This is
+    // invariant to anything else.
+    SmallVector<std::pair<StringAttr, int32_t>> normalizedColumn =
+        idxRegToCol.apply({{kRegister, idxReg}});
+    int32_t srcBase =
+        invertSrcRegMapColPart.apply(normalizedColumn).front().second;
+
+    Value result = b.undef(srcValues.front().getType());
+    for (unsigned i = 0; i != numRegsPerColumn; ++i) {
+      int32_t rest =
+          invertSrcRegMapRest.apply({{kGatherDim, i}}).front().second;
+      int32_t srcRegIdx = srcBase ^ rest;
+      Value value = srcValues[srcRegIdx];
+      result = b.select(b.icmp_eq(b.i32_val(srcRegIdx), srcReg), value, result);
+    }
+
+    results.push_back(result);
+  }
+
+  rewriter.replaceOp(op, packLLElements(loc, getTypeConverter(), results,
+                                        rewriter, op.getType()));
 }
 
 // High-level description of the algorithm:

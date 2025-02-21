@@ -538,7 +538,7 @@ GatherLoweringHelper::GatherLoweringHelper(triton::GatherOp gatherOp)
 
 unsigned GatherLoweringHelper::getScratchSizeInBytes() {
   // If the gather is warp-local, no scratch space is needed.
-  if (isWarpLocal())
+  if (isWarpLocal() || isThreadLocal())
     return 0;
 
   // Otherwise, performing the gather will require scratch space to communicate
@@ -547,6 +547,41 @@ unsigned GatherLoweringHelper::getScratchSizeInBytes() {
   RankedTensorType srcType = gatherOp.getSrc().getType();
   return product(srcType.getShape()) *
          ceil<unsigned>(srcType.getElementTypeBitWidth(), 8);
+}
+
+bool GatherLoweringHelper::isThreadLocal() {
+  // The gather is thread-local if for each column along the gather axis in the
+  // source and index tensors, all the elements are owned by the same thread.
+  RankedTensorType srcType = gatherOp.getSrc().getType();
+  RankedTensorType idxType = gatherOp.getIndices().getType();
+  LinearLayout srcLayout =
+      toLinearLayout(srcType.getShape(), srcType.getEncoding());
+  LinearLayout idxLayout =
+      toLinearLayout(idxType.getShape(), idxType.getEncoding());
+
+  Builder b(gatherOp.getContext());
+  StringAttr kLane = b.getStringAttr("lane");
+  StringAttr kWarp = b.getStringAttr("warp");
+  StringAttr kBlock = b.getStringAttr("block");
+  StringAttr kGatherDim =
+      b.getStringAttr("dim" + std::to_string(gatherOp.getAxis()));
+
+  if (!srcLayout.sublayoutIsZero({kBlock, kWarp, kLane}, kGatherDim) ||
+      !idxLayout.sublayoutIsZero({kBlock, kWarp, kLane}, kGatherDim))
+    return false;
+
+  SmallVector<StringAttr> otherDims;
+  for (unsigned dim = 0, rank = srcType.getRank(); dim < rank; ++dim) {
+    if (dim != gatherOp.getAxis()) {
+      otherDims.push_back(b.getStringAttr("dim" + Twine(dim)));
+    }
+  }
+
+  if (srcLayout.sublayout({kBlock, kWarp, kLane}, otherDims) !=
+      idxLayout.sublayout({kBlock, kWarp, kLane}, otherDims))
+    return false;
+
+  return true;
 }
 
 bool GatherLoweringHelper::isWarpLocal() {

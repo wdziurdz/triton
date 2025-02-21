@@ -161,6 +161,8 @@ public:
   unsigned getScratchSizeInBytes();
   // Determine if the gather can be performed completely within a warp.
   bool isWarpLocal();
+  // Determine if the gather can be performed completely within a thread.
+  bool isThreadLocal();
 
 private:
   triton::GatherOp gatherOp;
