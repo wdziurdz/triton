@@ -146,8 +146,10 @@ static void setOptimizedGatherLayout(GatherOp op, RewriterBase &b) {
 
   // Minimize `sizePerThread[axis]` by putting as many theads along the axis as
   // possible, limited to the actual size of the dimension.
-  unsigned maxThreadsInAxis =
-      std::min<unsigned>(srcType.getDimSize(axis), numThreadsPerWarp);
+  auto bitwidth = srcType.getElementType().getIntOrFloatBitWidth();
+  unsigned maxThreadsInAxis = std::min<unsigned>(
+      std::max<unsigned>(1, srcType.getDimSize(axis) * bitwidth / 128),
+      numThreadsPerWarp);
   threadsPerWarp[axis] = maxThreadsInAxis;
 
   // Now spread them along the other dimensions. Do this according to order
