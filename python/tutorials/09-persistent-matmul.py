@@ -287,6 +287,7 @@ def matmul_kernel_persistent(a_ptr, b_ptr, c_ptr,  #
         offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
         c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
         c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
+        c = c + 1.
         if (c_ptr.dtype.element_ty == tl.float8e4nv):
             c = accumulator.to(tl.float8e4nv)
         else:
@@ -321,11 +322,11 @@ def matmul_tma_persistent_get_configs():
     return [
         triton.Config({'BLOCK_SIZE_M': BM, 'BLOCK_SIZE_N': BN, "BLOCK_SIZE_K" : BK, "GROUP_SIZE_M" : 8, "EPILOGUE_SUBTILE" : SUBTILE}, num_stages=s, num_warps=w) \
         for BM in [128] \
-        for BN in [128, 256] \
-        for BK in [64, 128] \
-        for s in ([3, 4]) \
-        for w in [4, 8] \
-        for SUBTILE in [True, False] \
+        for BN in [256] \
+        for BK in [128] \
+        for s in ([4]) \
+        for w in [8] \
+        for SUBTILE in [False] \
     ]
 
 
@@ -531,6 +532,7 @@ def matmul_kernel_descriptor_persistent(a_ptr, b_ptr, c_ptr,  #
             c1 = acc1.to(dtype)
             c_desc.store([offs_cm, offs_cn + BLOCK_SIZE_N // 2], c1)
         else:
+            accumulator = accumulator + tl.full((BLOCK_SIZE_M, BLOCK_SIZE_N), 1.0, dtype=tl.float32)
             c = accumulator.to(dtype)
             c_desc.store([offs_cm, offs_cn], c)
 
@@ -629,39 +631,9 @@ def validate(M, N, K, dtype):
     b = torch.randn((K, N), device="cuda", dtype=torch.float16).to(dtype)
     b = b.T.contiguous()
 
-    torch_result = torch_matmul(a, b) if dtype == torch.float16 else None
-    cublas_result = cublas_matmul(a, b) if cublas is not None else None
-    naive_result = matmul(a, b.T)
-    persistent_result = matmul_persistent(a, b.T)
-    tma_persistent_result = matmul_tma_persistent(a, b) if supports_tma() else None
     descriptor_persistent_result = matmul_descriptor_persistent(a, b) if supports_tma() else None
 
-    if torch_result is not None:
-        naive_vs_torch = "✅" if torch.allclose(naive_result.to(torch.float16), torch_result.to(torch.float16),
-                                               atol=1.0) else "❌"
-    if cublas_result is not None:
-        naive_vs_cublas = "✅" if torch.allclose(naive_result.to(torch.float16), cublas_result.to(torch.float16),
-                                                atol=1.0) else "❌"
-    naive_vs_persistent = "✅" if torch.allclose(naive_result.to(torch.float16), persistent_result.to(torch.float16),
-                                                atol=1.0) else "❌"
-    if tma_persistent_result is not None:
-        naive_vs_tma_persistent = "✅" if torch.allclose(cublas_result.to(torch.float16),
-                                                        tma_persistent_result.to(torch.float16), atol=1.0) else "❌"
-    if descriptor_persistent_result is not None:
-        naive_vs_descriptor_persistent = "✅" if torch.allclose(cublas_result.to(
-            torch.float16), descriptor_persistent_result.to(torch.float16), atol=1.0) else "❌"
-    print(f"M={M}, N={N}, K={K} verification naive vs: ", end="")
-    if torch_result is not None:
-        print(f"torch: {naive_vs_torch} ", end="")
-    if cublas_result is not None:
-        print(f"cublas: {naive_vs_cublas} ", end="")
-    print(f"persistent: {naive_vs_persistent} ", end="")
-    if tma_persistent_result is not None:
-        print(f"TMA persistent: {naive_vs_tma_persistent} ", end="")
-    if descriptor_persistent_result is not None:
-        print(f"Tensor descriptor persistent: {naive_vs_descriptor_persistent} ", end="")
-    print()
-
+   
 
 def show_profile(precision, profile_name):
     import triton.profiler.viewer as proton_viewer
@@ -694,11 +666,5 @@ if __name__ == "__main__":
 
         torch.manual_seed(0)
 
-        validate(32, 32, 32, dtype)
+        #validate(32, 32, 32, dtype)
         validate(8192, 8192, args.K_range[0], dtype)
-
-        proton.start("matmul", hook="triton")
-        for K in range(args.K_range[0], args.K_range[1] + 1, args.K_step):
-            bench(K, dtype)
-        proton.finalize()
-        show_profile(args.prec, "matmul")

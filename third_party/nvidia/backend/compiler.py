@@ -262,7 +262,8 @@ class CUDABackend(BaseBackend):
             passes.ttgpuir.add_fuse_nested_loops(pm)
             passes.common.add_canonicalizer(pm)
             passes.common.add_licm(pm)
-            passes.ttgpuir.add_optimize_accumulator_init(pm)
+         # uncomment to see the pressure go up.
+         #   passes.ttgpuir.add_optimize_accumulator_init(pm)
             passes.common.add_canonicalizer(pm)
             passes.ttgpuir.add_combine_tensor_select_and_if(pm)
             passes.ttgpuir.add_pipeline(pm, opt.num_stages, dump_enabled)
