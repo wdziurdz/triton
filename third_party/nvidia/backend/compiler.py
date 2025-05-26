@@ -295,9 +295,12 @@ class CUDABackend(BaseBackend):
         return mod
 
     def make_llir(self, src, metadata, options, capability):
+        mod = src
         ptx_version = get_ptx_version_from_options(options, self.target.arch)
 
-        mod = src
+        name = llvm.get_kernel_name(mod)
+        print("\n\n\n-----start:  ", name)
+        print("-----------------------\n\n\n")
         # TritonGPU -> LLVM-IR (MLIR)
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
@@ -339,6 +342,9 @@ class CUDABackend(BaseBackend):
             llvm.link_extern_libs(llvm_mod, paths)
 
         llvm.optimize_module(llvm_mod, llvm.OPTIMIZE_O3)
+
+        print("\n\n\n-----end:  ", name)
+        print("-----------------------\n\n\n")
 
         # Get some metadata
         # warp-specialization mutates num_warps

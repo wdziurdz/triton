@@ -31,6 +31,11 @@
 #include <pybind11/stl.h>
 #include <stdexcept>
 
+#include "triton/Conversion/TritonGPUToLLVM/Utility.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
+#include "triton/Dialect/Triton/IR/Types.h"
+#include "triton/Dialect/Triton/IR/Utility.h"
+
 namespace py = pybind11;
 
 namespace llvm {
@@ -236,7 +241,7 @@ void init_triton_llvm(py::module &&m) {
                      ValueAsMetadata::get(fn),
                      MDString::get(fn->getContext(), "maxnreg"),
                      ConstantAsMetadata::get(ConstantInt::get(
-                         Type::getInt32Ty(fn->getContext()), maxnreg)),
+                         llvm::Type::getInt32Ty(fn->getContext()), maxnreg)),
                  });
              fn->getParent()
                  ->getOrInsertNamedMetadata("nvvm.annotations")
@@ -286,6 +291,19 @@ void init_triton_llvm(py::module &&m) {
         std::nullopt, llvm::CodeGenOptLevel::None)};
     // set data layout
     mod->setDataLayout(machine->createDataLayout());
+  });
+
+  m.def("get_kernel_name", [](mlir::ModuleOp mod) {
+    triton::FuncOp kernelFunc;
+    mod.walk([&](triton::FuncOp func) {
+      if (LLVM::isKernel(func)) {
+        kernelFunc = func;
+        return WalkResult::interrupt();
+      }
+      return WalkResult::skip();
+    });
+    assert(kernelFunc);
+    return kernelFunc.getName().str();
   });
 
   m.def(
