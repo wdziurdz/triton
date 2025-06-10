@@ -179,6 +179,10 @@ Value getPredMask(RewriterBase &rewriter, Type typeLike, Value currentMask,
 
 MakeTensorPtrOp getMakeTensorPtrOp(Value v);
 
+bool isHostSideDescriptor(Value v);
+
+bool isKernel(FunctionOpInterface funcOp);
+
 } // namespace triton
 } // namespace mlir
 

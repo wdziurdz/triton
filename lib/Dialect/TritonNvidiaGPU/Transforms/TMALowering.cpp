@@ -160,7 +160,9 @@ static void lowerTMAStore(Operation *op, mlir::TypedValue<RankedTensorType> src,
   Value tmaPtr =
       rewriter.create<triton::nvidia_gpu::TensorDescToTMAPtrOp>(loc, desc);
   createStore(tmaPtr, alloc);
-  rewriter.create<triton::nvidia_gpu::TMAStoreWaitOp>(loc, 0);
+  bool useHostSideDescriptor = triton::isHostSideDescriptor(desc);
+  rewriter.create<triton::nvidia_gpu::TMAStoreWaitOp>(loc, 0,
+                                                      useHostSideDescriptor);
   rewriter.eraseOp(op);
 }
 

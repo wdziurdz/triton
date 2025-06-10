@@ -239,7 +239,7 @@ py::list getTensorDescMetadata(ModuleOp &mod) {
   py::list result;
   triton::FuncOp kernelFunc;
   mod.walk([&](triton::FuncOp func) {
-    if (LLVM::isKernel(func)) {
+    if (triton::isKernel(func)) {
       kernelFunc = func;
       return WalkResult::interrupt();
     }
@@ -653,7 +653,7 @@ void init_triton_ir(py::module &&m) {
            [](ModuleOp &self) -> std::string {
              for (auto &op : self.getOps()) {
                if (auto func = dyn_cast<FuncOp>(op)) {
-                 if (LLVM::isKernel(func))
+                 if (triton::isKernel(func))
                    return func.getName().str();
                }
              }

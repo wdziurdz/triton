@@ -90,3 +90,17 @@ tt::MakeTensorPtrOp tt::getMakeTensorPtrOp(Value v) {
   }
   llvm_unreachable("Unable to getMakeTensorPtr()");
 }
+
+bool tt::isKernel(FunctionOpInterface funcOp) {
+  return funcOp.getVisibility() == SymbolTable::Visibility::Public;
+}
+
+bool tt::isHostSideDescriptor(Value v) {
+  auto arg = dyn_cast<BlockArgument>(v);
+  if (!arg)
+    return false;
+  auto funcOp = dyn_cast<FunctionOpInterface>(arg.getOwner()->getParentOp());
+  if (!funcOp)
+    return false;
+  return tt::isKernel(funcOp);
+}
