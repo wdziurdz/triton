@@ -1,5 +1,6 @@
 #include "triton/Dialect/Triton/IR/Utility.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
+#include "triton/Dialect/TritonGPU/Transforms/PipeliningUtility.h"
 #include "triton/Dialect/TritonGPU/Transforms/Schedule.h"
 #include "triton/Dialect/TritonNvidiaGPU/IR/Dialect.h"
 #include "triton/Dialect/TritonNvidiaGPU/Transforms/TMAUtilities.h"
@@ -93,6 +94,12 @@ static void createTMAAsyncCopy(scf::ForOp forOp, const TMAStore &store,
   store.op->erase();
 }
 
+static void lowerTMADescriptorCreation(scf::ForOp forOp) {
+  // TMA store is pipelining 3 stages.
+  triton::CoarseSchedule schedule(3);
+  triton::lowerTMADescriptors(forOp, schedule);
+}
+
 bool mlir::triton::pipelineTMAStores(scf::ForOp forOp) {
   SmallVector<TMAStore> tmaStores = getTMAStores(forOp);
   if (tmaStores.empty())
@@ -130,7 +137,7 @@ bool mlir::triton::pipelineTMAStores(scf::ForOp forOp) {
   if (hasDeviceSideTMA) {
     // This is a bit coarse as it would multibuffer any descriptor in the loop
     // but it likely to not have a big impact.
-    // lowerTMADescriptorCreation(forOp);
+    lowerTMADescriptorCreation(forOp);
   }
   return true;
 }
