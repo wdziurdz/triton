@@ -1015,7 +1015,7 @@ void lowerLoop(scf::ForOp forOp) {
   }
   scf::ForOp newForOp = lowerMMAs(forOp, schedule);
   newForOp = lowerLoads(newForOp, schedule);
-  newForOp = lowerTMADescriptors(newForOp, schedule);
+  //newForOp = lowerTMADescriptors(newForOp, schedule);
   schedule.serialize(newForOp);
 }
 
