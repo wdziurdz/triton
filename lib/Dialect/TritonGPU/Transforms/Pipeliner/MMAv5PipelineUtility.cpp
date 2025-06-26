@@ -115,7 +115,7 @@ void ttng::MMAv5PipelineableOperandsHelper::run() {
     }
   }
   isPipelineable =
-      isOperandsStateDetermined && unpipelineableOperandDefs.empty();
+      isOperandsStateDetermined;
 }
 
 bool ttng::hasAccReadModifyWrite(ttng::MMAv5OpInterface mma, scf::ForOp forOp) {
