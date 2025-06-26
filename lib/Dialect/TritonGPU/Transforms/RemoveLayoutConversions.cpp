@@ -1,5 +1,6 @@
 #include "mlir/Analysis/SliceAnalysis.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/Dominance.h"
 #include "mlir/IR/IRMapping.h"
@@ -344,7 +345,18 @@ void LayoutPropagation::resolveConflicts() {
       continue;
     // Hacky resolve, prefer block encoding.
     // TODO: add a proper heuristic.
+    auto shape = cast<RankedTensorType>(it.first.getType()).getShape();
     Attribute encoding = *info.encodings.begin();
+    // Pick a default encoding minimizing the number of registers.
+    unsigned minNumRegs = getTotalElemsPerThread(encoding, shape);
+    for (Attribute e : info.encodings) {
+      unsigned numRegs = getTotalElemsPerThread(e, shape);
+      if (numRegs < minNumRegs) {
+        encoding = e;
+        minNumRegs = numRegs;
+      }
+    }
+    
     bool isLoadOrStore =
         op && isa<LoadOp, StoreOp, AtomicRMWOp, AtomicCASOp>(op);
     for (Attribute e : info.encodings) {
