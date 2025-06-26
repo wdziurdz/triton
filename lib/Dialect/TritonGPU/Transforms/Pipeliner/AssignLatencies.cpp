@@ -181,9 +181,7 @@ private:
                 LDBG("Load " << *op
                              << " has multiple uses at different distances:"
                              << level << " and " << distance);
-                loadOpToIndLevel.erase(op);
-                excluded.insert(op);
-                return;
+                loadOpToIndLevel[op] = std::max(level, distance);
               }
             } else {
               LDBG("Load " << *op << " considered for pipelining with distance "
