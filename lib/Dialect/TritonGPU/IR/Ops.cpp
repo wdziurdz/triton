@@ -1,5 +1,6 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Diagnostics.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/Support/DebugStringHelper.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Utility.h"
@@ -201,6 +202,27 @@ struct CanonicalizeConvertFromLocalStore
   }
 };
 
+struct CanonicalizeConvertFromDescriptorStore : public mlir::RewritePattern {
+public:
+  CanonicalizeConvertFromDescriptorStore(MLIRContext *context)
+      : mlir::RewritePattern(mlir::Pattern::MatchAnyOpTypeTag(), /*benefit=*/1, context) {}
+
+  mlir::LogicalResult
+  matchAndRewrite(Operation *op,
+                  PatternRewriter &rewriter) const override {
+    auto store = dyn_cast<triton::DescriptorStoreLikeOpInterface>(op);
+    if (!store)
+      return failure();
+    auto convert = store.getSrc().getDefiningOp<ConvertLayoutOp>();
+    if (!convert)
+      return failure();
+    rewriter.modifyOpInPlace(op, [&]() {
+      store.getSrcMutable().assign(convert.getSrc());
+    });
+    return mlir::success();
+  }
+};
+
 struct CanonicalizeConvertFromSplit
     : public mlir::OpRewritePattern<triton::SplitOp> {
   using OpRewritePattern::OpRewritePattern;
@@ -348,6 +370,7 @@ void ConvertLayoutOp::getCanonicalizationPatterns(RewritePatternSet &patterns,
   patterns.add<CanonicalizeConvertFromAlloc>(context);
   patterns.add<CanonicalizeConvertFromLocalStore>(context);
   patterns.add<CanonicalizeConvertFromSplit>(context);
+  patterns.add<CanonicalizeConvertFromDescriptorStore>(context);
 }
 
 LogicalResult Fp4ToFpOp::verify() {
