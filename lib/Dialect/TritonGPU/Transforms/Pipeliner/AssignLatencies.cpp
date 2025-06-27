@@ -90,7 +90,8 @@ public:
     unsigned loadLatency = (numStages - 1) / (maxIndirectionLevel + 1);
 
     for (auto [loadOp, dist] : loadOpToIndLevel) {
-      opLatency[loadOp] = loadLatency;
+      bool isScalar = !isa<RankedTensorType>(loadOp->getResultTypes()[0]);
+      opLatency[loadOp] = isScalar ? 1 : loadLatency;
     }
   }
 
