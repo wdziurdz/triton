@@ -90,6 +90,7 @@ public:
     unsigned loadLatency = (numStages - 1) / (maxIndirectionLevel + 1);
 
     for (auto [loadOp, dist] : loadOpToIndLevel) {
+      // Hack force latency of 1 for scalar loads as they go through regs.
       bool isScalar = !isa<RankedTensorType>(loadOp->getResultTypes()[0]);
       opLatency[loadOp] = isScalar ? 1 : loadLatency;
     }
