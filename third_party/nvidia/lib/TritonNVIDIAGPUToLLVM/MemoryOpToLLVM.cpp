@@ -135,7 +135,7 @@ LogicalResult lowerLdStMatrix(
     // ... and no other basis should depend on 1, 2, 4 (or 8 in b8 mode)
     // Note that this gives us the usual alignment condition, but we have
     // translated it to checking that the matrix to the left of A is all zeros
-    auto mask = bitwidth == 8 ? 0b1111 : 0b111;
+    auto mask = llvm::Log2_32(128 / bitwidth) - 1;
     for (auto dim : cvt.getInDimNames()) {
       const auto &bases = cvt.getBases().find(dim)->second;
       for (auto [i, basis] : llvm::enumerate(bases)) {
@@ -154,8 +154,8 @@ LogicalResult lowerLdStMatrix(
   // If we are lowering a subslice, the subslice offsets shall not touch the
   // contiguous part of the tile
   if (auto mask = smemObj.getMaskSpanOffsets(memDescType)) {
-    auto elemsContig = 128 / bitwidth;
-    if (mask & (elemsContig - 1)) {
+    auto contigTileMask = llvm::Log2_32(128 / bitwidth) - 1;
+    if (mask & contigTileMask) {
       return failure();
     }
   }
