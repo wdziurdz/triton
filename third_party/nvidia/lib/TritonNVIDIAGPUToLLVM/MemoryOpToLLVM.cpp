@@ -65,11 +65,6 @@ LogicalResult lowerLdStMatrix(
   if (cvt.hasInDim(kBlock))
     return failure();
 
-  // We must have at least 32 / bitwidth register elements to use .trans
-  if (transpose && cvt.getInDimSizeLog2(kReg) < llvm::Log2_32(32 / bitwidth)) {
-    return failure();
-  }
-
   auto srcVals =
       isStore ? unpackLLElements(loc, src, rewriter) : SmallVector<Value>{};
 
@@ -80,10 +75,16 @@ LogicalResult lowerLdStMatrix(
     srcVals = removeBroadcast.apply(srcVals);
   }
 
+  // We must have at least 32 / bitwidth elements
+  if (cvt.getInDimSize(kReg) < 32 / bitwidth) {
+    return failure();
+  }
+
   std::optional<ColumnAction> maybePermutation;
-  LinearLayout tile = LinearLayout::identity1D(32 / bitwidth, kReg, kOffset) *
-                      LinearLayout::identity1D(4, kLane, kOffset);
+  LinearLayout tile;
   if (!transpose) {
+    tile = LinearLayout::identity1D(32 / bitwidth, kReg, kOffset) *
+           LinearLayout::identity1D(4, kLane, kOffset);
     // Find if there is a register permutation that allows us to divideLeft
     // We need to pass the map from regs to offsets, as is cvt
     maybePermutation = regPermForDivide(cvt, tile, /*left=*/true);
