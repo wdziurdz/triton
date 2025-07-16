@@ -56,13 +56,19 @@ LogicalResult lowerLdStMatrix(
   auto supported =
       (!transpose && bitwidth <= 32) ||
       (transpose &&
-       (bitwidth == 16 || (bitwidth == 8 && targetInfo.supportLdStMatrixB8())));
+       (bitwidth == 16 ||
+        (bitwidth == 8 && targetInfo.supportLdStMatrixB8() && !isStore)));
   if (!supported)
     return failure();
 
   // Inter block stmatrix is not supported
   if (cvt.hasInDim(kBlock))
     return failure();
+
+  // We must have at least 32 / bitwidth register elements to use .trans
+  if (transpose && cvt.getInDimSizeLog2(kReg) < llvm::Log2_32(32 / bitwidth)) {
+    return failure();
+  }
 
   auto srcVals =
       isStore ? unpackLLElements(loc, src, rewriter) : SmallVector<Value>{};
@@ -117,15 +123,24 @@ LogicalResult lowerLdStMatrix(
       if (laneBases[i + 2][0] != (1 << i))
         return failure();
     }
-    // ... and no other basis should depend on 1, 2, 4
+    // In b8 (m16n16) mode, the first basis of the register should be 8
+    // TODO: We could check if the shmem 8 maps to a register and permute
+    // in the future
+    if (bitwidth == 8) {
+      const auto &regBases = cvt.getBases().find(kReg)->second;
+      if (regBases[0][0] != 8)
+        return failure();
+    }
+    // ... and no other basis should depend on 1, 2, 4 (or 8 in b8 mode)
     // Note that this gives us the usual alignment condition, but we have
     // translated it to checking that the matrix to the left of A is all zeros
+    auto mask = bitwidth == 8 ? 0b1111 : 0b111;
     for (auto dim : cvt.getInDimNames()) {
       const auto &bases = cvt.getBases().find(dim)->second;
       for (auto [i, basis] : llvm::enumerate(bases)) {
-        if (dim == kLane && i >= 2)
+        if (dim == kLane && i >= 2 || (bitwidth == 8 && dim == kReg && i == 0))
           continue;
-        if (basis[0] & 0b111)
+        if (basis[0] & mask)
           return failure();
       }
     }
@@ -138,19 +153,10 @@ LogicalResult lowerLdStMatrix(
   // If we are lowering a subslice, the subslice offsets shall not touch the
   // contiguous part of the tile
   if (auto mask = smemObj.getMaskSpanOffsets(memDescType)) {
-    for (const auto &bases : llvm::make_second_range(tile.getBases())) {
-      for (auto basis : bases) {
-        assert(basis.size() == 1 && "Expecting just kOffset");
-        if (basis[0] & mask) {
-          return failure();
-        }
-      }
+    auto elemsContig = 128 / bitwidth;
+    if (mask & (elemsContig - 1)) {
+      return failure();
     }
-  }
-
-  // We must have at least 2 register elements to use stmatrix.trans
-  if (transpose && reps.getInDimSizeLog2(kReg) < llvm::Log2_32(32 / bitwidth)) {
-    return failure();
   }
 
   // Choose up to 4 packs of 32-bit elements indexed by the next (at most) two
@@ -159,7 +165,7 @@ LogicalResult lowerLdStMatrix(
   auto vec = std::min<int32_t>(2, reps.getInDimSizeLog2(kReg) -
                                       llvm::Log2_32(32 / bitwidth));
 
-  // b8 just supports m16n16 mode...
+  // b8 just supports m16n16 mode which effectively implies vec == 1
   if (bitwidth == 8 && vec == 0) {
     return failure();
   }
