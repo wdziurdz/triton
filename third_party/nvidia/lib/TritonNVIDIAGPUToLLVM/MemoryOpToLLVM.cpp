@@ -52,8 +52,14 @@ LogicalResult lowerLdStMatrix(
   // so we cannot split an fp32
   // We could support bitwidth == 8, but it'd be a rather weird layout
   // so we don't do that for now
-  if ((!transpose && bitwidth > 32) || (transpose && bitwidth != 16))
+
+  auto supported =
+      (!transpose && bitwidth <= 32) ||
+      (transpose &&
+       (bitwidth == 16 || (bitwidth == 8 && targetInfo.supportLdStMatrixB8())));
+  if (!supported)
     return failure();
+
   // Inter block stmatrix is not supported
   if (cvt.hasInDim(kBlock))
     return failure();
@@ -153,6 +159,11 @@ LogicalResult lowerLdStMatrix(
   auto vec = std::min<int32_t>(2, reps.getInDimSizeLog2(kReg) -
                                       llvm::Log2_32(32 / bitwidth));
 
+  // b8 just supports m16n16 mode...
+  if (bitwidth == 8 && vec == 0) {
+    return failure();
+  }
+
   // Map from kReg, kLane, kWarp to beginning of each tile
   assert(reps.getOutDimSize(kOffset) == cvt.getOutDimSize(kOffset));
 
@@ -226,12 +237,13 @@ LogicalResult lowerLdStMatrix(
                        ? i32_ty
                        : static_cast<Type>(LLVM::LLVMStructType::getLiteral(
                              ctx, SmallVector<Type>(nVecs, i32_ty)));
+      auto shape = bitwidth == 8 ? triton::nvgpu::LoadMatrixShape::m16n16
+                                 : triton::nvgpu::LoadMatrixShape::m8n8;
       auto res =
           rewriter
-              .create<triton::nvgpu::LoadMatrixOp>(
-                  loc, matTy, vecAddr, triton::nvgpu::LoadMatrixShape::m8n8,
-                  /*bitWidth=*/16,
-                  /*needTrans=*/transpose)
+              .create<triton::nvgpu::LoadMatrixOp>(loc, matTy, vecAddr, shape,
+                                                   /*bitWidth=*/bitwidth,
+                                                   /*needTrans=*/transpose)
               .getResult();
       // Extract result into srcVals
       for (int j = 0; j < nVecs; j++) {
