@@ -8,16 +8,7 @@ SmallVector<unsigned> getCTATileOrder(MLIRContext *ctx,
                                       const triton::LinearLayout &layout) {
   auto llEnc = triton::gpu::LinearEncodingAttr::get(ctx, layout);
   auto regDim = StringAttr::get(ctx, "register");
-  auto &bases = layout.getBases().find(regDim)->second;
-
-  // Compute number of CTA tiles in a layout.
-  unsigned totalElems = layout.getTotalOutDimSize();
-  auto ctaShape = llEnc.getShapePerCTATile();
-  unsigned elemsPerCTA =
-      std::accumulate(ctaShape.begin(), ctaShape.end(), 1, std::multiplies<>());
-  assert((totalElems % elemsPerCTA) == 0 &&
-         "Total elements must be divisible by elemsPerCTA");
-  unsigned numCTAs = totalElems / elemsPerCTA;
+  unsigned numCTAs = product(llEnc.getCTAsPerCGA());
 
   // To determine the CTA tile order, start by identifying the register basis
   // vector that corresponds to the first element of the second CTA tile. The
@@ -31,6 +22,7 @@ SmallVector<unsigned> getCTATileOrder(MLIRContext *ctx,
       static_cast<unsigned>(std::log2(registersPerThreadPerCTA));
 
   llvm::SmallSetVector<unsigned, 8> order;
+  auto &bases = layout.getBases().find(regDim)->second;
   for (unsigned i = startIndex; i < bases.size(); ++i) {
     auto range = llvm::make_range(bases[i].begin(), bases[i].end());
     auto it = llvm::find_if(range, [](unsigned v) { return v != 0; });

@@ -2005,7 +2005,7 @@ def test_atomic_unsupported_type(dtype_str, device):
 
 @pytest.mark.interpreter
 @pytest.mark.parametrize("dtype_str", ["int32", "float16"])
-@pytest.mark.parametrize("size", [1, 4, 16])
+@pytest.mark.parametrize("size", [1, 4, 16, 64])
 @pytest.mark.parametrize("op", ["add", "cas"])
 def test_tensor_atomic_use_result(dtype_str, size, op, device):
     if is_hip():

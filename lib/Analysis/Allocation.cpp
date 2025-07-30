@@ -89,24 +89,24 @@ static SmallVector<unsigned> getRepShapeForCvt(RankedTensorType srcTy,
 // because Triton's block-based programming model ensures that
 // all threads sharing the same partition of the tensor see the same values,
 // even for threads that do not participate in the atomic operation
-static SmallVector<unsigned> getRepShapeForAtomic(Value result) {
-  SmallVector<unsigned> smemShape;
+static size_t getNumScratchElemsForAtomic(Value result) {
+  size_t numElems = 0;
   if (!result.use_empty()) {
     if (auto tensorTy = dyn_cast<RankedTensorType>(result.getType())) {
-      auto freeVariableMasks =
-          gpu::toLinearLayout(tensorTy).getFreeVariableMasks();
+      auto ll = gpu::toLinearLayout(tensorTy);
+      auto freeVariableMasks = ll.getFreeVariableMasks();
       if (llvm::any_of(freeVariableMasks, [](auto variableMask) {
             return variableMask.second != 0;
           })) {
         // The tensor has broadcasted dimensions
-        smemShape = gpu::getShapePerCTATile(tensorTy);
+        numElems = product(gpu::getShapePerCTA(tensorTy));
       }
     } else {
       // If the result is a scalar, we need to allocate a single element.
-      smemShape.push_back(1);
+      numElems = 1;
     }
   }
-  return smemShape;
+  return numElems;
 }
 
 std::pair<unsigned, unsigned>
@@ -123,21 +123,12 @@ getScratchCvtInOutVecLengths(RankedTensorType srcTy, RankedTensorType dstTy) {
 
   unsigned srcContigPerThread = srcLinAttr.getContigPerThread()[inOrd[0]];
   unsigned dstContigPerThread = dstLinAttr.getContigPerThread()[outOrd[0]];
-  // TODO: Fix the legacy issue that outOrd[0] == 0 always means
-  //       that we cannot do vectorization.
   unsigned innerDim = rank - 1;
   unsigned inVec = outOrd[0] != innerDim  ? 1
                    : inOrd[0] != innerDim ? 1
                                           : srcContigPerThread;
   unsigned outVec = outOrd[0] != innerDim ? 1 : dstContigPerThread;
 
-  if (isa<gpu::NvidiaMmaEncodingAttr>(srcLayout) &&
-      isa<gpu::BlockedEncodingAttr>(dstLayout)) {
-    // when storing from mma layout and loading in blocked layout vectorizing
-    // the load back gives better performance even if there is a
-    // transposition.
-    outVec = dstContigPerThread;
-  }
   return {inVec, outVec};
 }
 
@@ -214,8 +205,7 @@ unsigned defaultAllocationAnalysisScratchSizeFn(Operation *op) {
   }
   if (isa<AtomicRMWOp, AtomicCASOp>(op)) {
     auto value = op->getOperand(0);
-    auto smemShape = getRepShapeForAtomic(op->getResult(0));
-    auto elems = getNumScratchElements(smemShape);
+    auto elems = getNumScratchElemsForAtomic(op->getResult(0));
     if (elems == 0)
       return 0;
     auto elemTy = getElementTypeOrSelf(getPointeeType(value.getType()));
