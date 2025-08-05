@@ -43,4 +43,6 @@ class LaunchHook(Hook):
         libproton.add_metrics(self.id, fn_metrics)
 
     def exit(self, lazy_dict: LazyDict) -> None:
+        print(f"exit {self.op_name}")
+        print(f"id {self.id}")
         libproton.exit_op(self.id, self.op_name)
