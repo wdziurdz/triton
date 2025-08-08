@@ -134,6 +134,9 @@ def activate(session: Optional[int] = None) -> None:
     Returns:
         None
     """
+    import threading
+    tid = threading.get_ident()
+    print(f"Activating session {session} on thread {tid}")
     if is_command_line() and session != 0:
         raise ValueError("Only one session can be activated when running from the command line.")
 
@@ -156,6 +159,9 @@ def deactivate(session: Optional[int] = None) -> None:
     Returns:
         None
     """
+    import threading
+    tid = threading.get_ident()
+    print(f"Activating session {session} on thread {tid}")
     if is_command_line() and session != 0:
         raise ValueError("Only one session can be deactivated when running from the command line.")
 
