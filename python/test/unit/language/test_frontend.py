@@ -308,7 +308,7 @@ def test_aggregate_with_constexpr():
     # CHECK: arith.addi %arg0, %cst : tensor<4xi32>
 
 
-@triton.constexpr_function
+@tl.constexpr_function
 def constexpr_function(x):
     return x + 1
 
@@ -345,12 +345,12 @@ def test_reassign_aggregate_with_constexpr():
     agg = agg.modify(tl.arange(4, 8))
 
 
-@triton.constexpr_function
+@tl.constexpr_function
 def make_shape(m, n):
     return (m, n)
 
 
-@triton.constexpr_function
+@tl.constexpr_function
 def add_shape_dims(m, n):
     return m + n
 
@@ -365,7 +365,7 @@ def test_constexpr_getitem():
     tl.arange(4, sum)
 
 
-@triton.constexpr_function
+@tl.constexpr_function
 def make_constexpr_closure(x):
     x = tl.constexpr(x)
 
@@ -386,7 +386,7 @@ def test_constexpr_closure():
     closure((128, 128))
 
 
-@triton.constexpr_function
+@tl.constexpr_function
 def make_constexpr_generator(f):
     f = tl.constexpr(f)
 
@@ -422,7 +422,7 @@ def test_constexpr_generator():
     generator(lhs)
 
 
-@triton.constexpr_function
+@tl.constexpr_function
 def Box(T):
 
     @tl.core._aggregate
