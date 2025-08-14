@@ -411,6 +411,8 @@ void CuptiProfiler::CuptiProfilerPimpl::doFlush() {
   cupti::activityFlushAll<true>(/*flag=*/CUPTI_ACTIVITY_FLAG_FLUSH_FORCED);
 }
 
+constexpr uint32_t CUPTI_CUDA12_9_VERSION = 29;
+
 void CuptiProfiler::CuptiProfilerPimpl::doStop() {
   if (profiler.isPCSamplingEnabled()) {
     profiler.disablePCSampling();
@@ -419,7 +421,14 @@ void CuptiProfiler::CuptiProfilerPimpl::doStop() {
     if (cuContext)
       pcSampling.finalize(cuContext);
     setResourceCallbacks(subscriber, /*enable=*/false);
-    cupti::activityDisable<true>(CUPTI_ACTIVITY_KIND_KERNEL);
+    uint32_t libVersion = 0;
+    cupti::getVersion<true>(&libVersion);
+    if (libVersion >= CUPTI_CUDA12_9_VERSION) {
+      // Since 12.9, CUPTI support concurrent kernels when PC sampling is on
+      cupti::activityDisable<true>(CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL);
+    } else {
+      cupti::activityDisable<true>(CUPTI_ACTIVITY_KIND_KERNEL);
+    }
   } else {
     cupti::activityDisable<true>(CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL);
   }

@@ -127,8 +127,8 @@ size_t matchStallReasonsToIndices(
   return numValidStalls;
 }
 
-#define CUPTI_CUDA12_4_VERSION 22
-#define CUPTI_CUDA12_4_PC_DATA_PADDING_SIZE sizeof(uint32_t)
+constexpr uint32_t CUPTI_CUDA12_4_VERSION = 22;
+constexpr uint32_t CUPTI_CUDA12_4_PC_DATA_PADDING_SIZE = sizeof(uint32_t);
 
 CUpti_PCSamplingData allocPCSamplingData(size_t collectNumPCs,
                                          size_t numValidStallReasons) {
