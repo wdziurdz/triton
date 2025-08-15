@@ -1089,12 +1089,10 @@ struct TMEMSubSliceOpConversion
       offsetCol /= elemsPerReg;
     }
 
-    // enforced in the validator
-    assert(rowColMap[str_attr("block")] == 0);
-
     Value tmemBase = adaptor.getSrc();
     Value offsetVal = b.i32_val(offsetCol | offsetRow << 16);
-    Value newBase = b.add(b.ptrtoint(i32_ty, tmemBase), offsetVal);
+    Value newBase = b.or_(b.ptrtoint(i32_ty, tmemBase), offsetVal,
+                          /*disjoint=*/true);
     auto elemPtrTy = ptr_ty(rewriter.getContext(), 3);
     rewriter.replaceOp(op, b.inttoptr(elemPtrTy, newBase));
     return success();
