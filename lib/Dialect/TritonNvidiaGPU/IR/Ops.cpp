@@ -646,12 +646,6 @@ LogicalResult TMEMSubSliceOp::verify() {
     return emitError("The split offset may not exceed the source shape");
   }
 
-  auto offsetMap = getOffsetMap(dstTy, getN());
-  auto kBlock = StringAttr::get(getContext(), "block");
-  if (offsetMap[kBlock] != 0) {
-    return emitOpError("The block dimension must be 0.");
-  }
-
   return success();
 }
 
