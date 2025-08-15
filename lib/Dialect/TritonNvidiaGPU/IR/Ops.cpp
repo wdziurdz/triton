@@ -629,6 +629,8 @@ LogicalResult TMEMSubSliceOp::verify() {
   if (srcTy.getElementType() != dstTy.getElementType())
     return emitOpError(
         "The source and result must have the same element type.");
+  if (srcTy.getEncoding() != dstTy.getEncoding())
+    return emitOpError("The source and result must have the same encoding.");
   if (srcTy.getAllocShape() != dstTy.getAllocShape())
     return emitOpError("The source and result must have the same alloc shape.");
   if (srcTy.getRank() != 2)

@@ -671,7 +671,6 @@ def TTNG_TMEMAllocOp : TTNG_Op<"tmem_alloc", [DeclareOpInterfaceMethods<MemoryEf
 }
 
 def TTNG_TMEMSubSliceOp : TTNG_Op<"tmem_subslice", [Pure,
-                                                    SameOperandsAndResultEncoding,
                                                     MemDescViewTrait]> {
   let summary = "Take a subslice of a tensor memory allocation";
   let description = [{
