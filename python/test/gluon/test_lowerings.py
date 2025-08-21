@@ -205,8 +205,9 @@ def test_store_layouts(M, src_layout, device):
     def kernel(x_ptr, y_ptr, M: ttgl.constexpr, layout: ttgl.constexpr):
         offs = ttgl.arange(0, M, layout=ttgl.SliceLayout(1, layout))
         x = ttgl.load(x_ptr + offs)
-        x2d = ttgl.expand_dims(x, axis=1)
-        ttgl.store(y_ptr + offs, x2d)
+        x_2d = ttgl.expand_dims(x, axis=1)
+        offs_2d = ttgl.arange(0, M, layout=ttgl.SliceLayout(1, layout))
+        ttgl.store(y_ptr + offs_2d, x_2d)
 
     torch.manual_seed(17)
     x = torch.randint(0, 4, (M, 1), dtype=torch.float32, device=device)
