@@ -188,3 +188,101 @@ def test_reduce_layouts(M, N, src_layout, axis, epilogue_kind, dtype_str, saniti
     if epilogue_kind in ("expand_reduce2d", "reduce2d"):
         z_ref = reduce_fn(z_ref, dim=1 - axis, keepdim=True)
     torch.testing.assert_close(z, z_ref.to(torch_dtype))
+
+
+_store_layouts = _filter_layouts([
+    ttgl.BlockedLayout([1, 4], [1, THREADS_PER_WARP], [4, 1], [1, 0], [1, 1], [1, 1], [0, 1]),
+    ttgl.BlockedLayout([1, 4], [1, THREADS_PER_WARP], [2, 2], [1, 0], [1, 1], [1, 1], [0, 1]),
+    ttgl.NVMMADistributedLayout(version=[2, 0], warps_per_cta=[4, 1], ctas_per_cga=[1, 1], cta_split_num=[1, 1],
+                                cta_order=[0, 1], instr_shape=[16, 8]),
+])
+
+
+@pytest.mark.parametrize("M", [32, 64, 128, 256])
+@pytest.mark.parametrize("src_layout", _store_layouts)
+def test_gluon_store_op(M, src_layout, device):
+
+    @gluon.jit
+    def kernel(x_ptr, y_ptr, M: ttgl.constexpr, layout: ttgl.constexpr):
+        offs = ttgl.arange(0, M, layout=ttgl.SliceLayout(1, layout))
+        x = ttgl.load(x_ptr + offs)
+        x2d = ttgl.expand_dims(x, axis=1)
+        ttgl.store(y_ptr + offs, x2d)
+
+    torch.manual_seed(17)
+    x = torch.randint(0, 4, (M, 1), dtype=torch.float32, device=device)
+    y = torch.zeros((M, 1), dtype=torch.float32, device=device)
+    kernel[(1, 1, 1)](x, y, M, src_layout, num_warps=4)
+    torch.testing.assert_close(y, x)
+
+
+_convert_layouts = _filter_layouts([
+    ttgl.BlockedLayout([1, 4], [1, THREADS_PER_WARP], [4, 1], [1, 0], [1, 1], [1, 1], [0, 1]),
+    ttgl.BlockedLayout([1, 4], [1, THREADS_PER_WARP], [2, 2], [1, 0], [1, 1], [1, 1], [0, 1]),
+    ttgl.NVMMADistributedLayout(version=[3, 0], warps_per_cta=[4, 1], ctas_per_cga=[1, 1], cta_split_num=[1, 1],
+                                cta_order=[1, 0], instr_shape=[16, 32, 16]),
+    ttgl.NVMMADistributedLayout(version=[2, 0], warps_per_cta=[4, 1], ctas_per_cga=[1, 1], cta_split_num=[1, 1],
+                                cta_order=[0, 1], instr_shape=[16, 8]),
+    ttgl.DotOperandLayout(parent=ttgl.NVMMADistributedLayout(version=[3, 0], warps_per_cta=[4, 1], ctas_per_cga=[1, 1],
+                                                            cta_split_num=[1, 1], cta_order=[1, 0],
+                                                            instr_shape=[16, 32, 16]), operand_index=0, k_width=2),
+    ttgl.DotOperandLayout(parent=ttgl.NVMMADistributedLayout(version=[2, 0], warps_per_cta=[2, 2], ctas_per_cga=[1, 1],
+                                                            cta_split_num=[1, 1], cta_order=[0, 1],
+                                                            instr_shape=[16, 8]), operand_index=0, k_width=2),
+])
+
+
+@pytest.mark.parametrize("M", [64, 128, 256])
+@pytest.mark.parametrize("src_layout", _convert_layouts)
+@pytest.mark.parametrize("dst_layout", _convert_layouts)
+@pytest.mark.parametrize("src_dim", [0, 1])
+@pytest.mark.parametrize("dst_dim", [0, 1])
+def test_gluon_convert1d(M, src_layout, dst_layout, src_dim, dst_dim, device):
+
+    @gluon.jit
+    def kernel(x_ptr, y_ptr, M: ttgl.constexpr, src_layout: ttgl.constexpr, dst_layout: ttgl.constexpr,
+               src_dim: ttgl.constexpr, dst_dim: ttgl.constexpr):
+        src_slice = ttgl.SliceLayout(src_dim, src_layout)
+        dst_slice = ttgl.SliceLayout(dst_dim, dst_layout)
+        offs_src = ttgl.arange(0, M, layout=src_slice)
+        x = ttgl.load(x_ptr + offs_src)
+        y = ttgl.convert_layout(x, dst_slice)
+        offs_dst = ttgl.arange(0, M, layout=dst_slice)
+        ttgl.store(y_ptr + offs_dst, y)
+
+    torch.manual_seed(17)
+    x = torch.randint(0, 4, (M,), dtype=torch.int32, device=device)
+    y = torch.zeros((M,), dtype=torch.int32, device=device)
+    kernel[(1, 1, 1)](x, y, M, src_layout, dst_layout, src_dim, dst_dim, num_warps=4)
+    torch.testing.assert_close(y, x)
+
+
+@pytest.mark.parametrize("M", [64, 128, 256])
+@pytest.mark.parametrize("src_layout", _convert_layouts)
+@pytest.mark.parametrize("dst_layout", _convert_layouts)
+@pytest.mark.parametrize("src_dim", [0, 1])
+@pytest.mark.parametrize("dst_dim", [0, 1])
+def test_gluon_convert1d_bool(M, src_layout, dst_layout, src_dim, dst_dim, device):
+
+    @gluon.jit
+    def kernel(x_ptr, y_ptr, M: ttgl.constexpr, src_layout: ttgl.constexpr, dst_layout: ttgl.constexpr,
+               src_dim: ttgl.constexpr, dst_dim: ttgl.constexpr):
+        src_slice = ttgl.SliceLayout(src_dim, src_layout)
+        dst_slice = ttgl.SliceLayout(dst_dim, dst_layout)
+        offs_src = ttgl.arange(0, M, layout=src_slice)
+        x_i8 = ttgl.load(x_ptr + offs_src)
+        pred = x_i8 != 0
+        pred_dst = ttgl.convert_layout(pred, dst_slice)
+        one = ttgl.full([M], 1, ttgl.int32, layout=dst_slice)
+        zero = ttgl.full([M], 0, ttgl.int32, layout=dst_slice)
+        out = ttgl.where(pred_dst, one, zero)
+        offs_dst = ttgl.arange(0, M, layout=dst_slice)
+        ttgl.store(y_ptr + offs_dst, out)
+
+    torch.manual_seed(17)
+    x = torch.randint(0, 2, (M,), dtype=torch.int8, device=device)
+    y = torch.zeros((M,), dtype=torch.int32, device=device)
+    kernel[(1, 1, 1)](x, y, M, src_layout, dst_layout, src_dim, dst_dim, num_warps=4)
+    ref = x.to(torch.int32)
+    torch.testing.assert_close(y, ref)
+
