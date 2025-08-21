@@ -191,12 +191,14 @@ def test_reduce_layouts(M, N, src_layout, axis, epilogue_kind, dtype_str, saniti
 
 
 @pytest.mark.parametrize("M", [32, 64, 128, 256])
-@pytest.mark.parametrize("src_layout", _filter_layouts([
-    ttgl.BlockedLayout([1, 4], [1, THREADS_PER_WARP], [4, 1], [1, 0], [1, 1], [1, 1], [0, 1]),
-    ttgl.BlockedLayout([1, 4], [1, THREADS_PER_WARP], [2, 2], [1, 0], [1, 1], [1, 1], [0, 1]),
-    ttgl.NVMMADistributedLayout(version=[2, 0], warps_per_cta=[4, 1], ctas_per_cga=[1, 1], cta_split_num=[1, 1],
-                                cta_order=[0, 1], instr_shape=[16, 8]),
-]))
+@pytest.mark.parametrize(
+    "src_layout",
+    _filter_layouts([
+        ttgl.BlockedLayout([1, 4], [1, THREADS_PER_WARP], [4, 1], [1, 0], [1, 1], [1, 1], [0, 1]),
+        ttgl.BlockedLayout([1, 4], [1, THREADS_PER_WARP], [2, 2], [1, 0], [1, 1], [1, 1], [0, 1]),
+        ttgl.NVMMADistributedLayout(version=[2, 0], warps_per_cta=[4, 1], ctas_per_cga=[1, 1], cta_split_num=[1, 1],
+                                    cta_order=[0, 1], instr_shape=[16, 8]),
+    ]))
 def test_store_layouts(M, src_layout, device):
 
     @gluon.jit
@@ -220,12 +222,14 @@ _1d_layouts = _filter_layouts([
                                 cta_order=[1, 0], instr_shape=[16, 32, 16]),
     ttgl.NVMMADistributedLayout(version=[2, 0], warps_per_cta=[4, 1], ctas_per_cga=[1, 1], cta_split_num=[1, 1],
                                 cta_order=[0, 1], instr_shape=[16, 8]),
-    ttgl.DotOperandLayout(parent=ttgl.NVMMADistributedLayout(version=[3, 0], warps_per_cta=[4, 1], ctas_per_cga=[1, 1],
-                                                            cta_split_num=[1, 1], cta_order=[1, 0],
-                                                            instr_shape=[16, 32, 16]), operand_index=0, k_width=2),
-    ttgl.DotOperandLayout(parent=ttgl.NVMMADistributedLayout(version=[2, 0], warps_per_cta=[2, 2], ctas_per_cga=[1, 1],
-                                                            cta_split_num=[1, 1], cta_order=[0, 1],
-                                                            instr_shape=[16, 8]), operand_index=0, k_width=2),
+    ttgl.DotOperandLayout(
+        parent=ttgl.NVMMADistributedLayout(version=[3, 0], warps_per_cta=[4, 1], ctas_per_cga=[1, 1],
+                                           cta_split_num=[1, 1], cta_order=[1, 0], instr_shape=[16, 32, 16]),
+        operand_index=0, k_width=2),
+    ttgl.DotOperandLayout(
+        parent=ttgl.NVMMADistributedLayout(version=[2, 0], warps_per_cta=[2, 2], ctas_per_cga=[1, 1],
+                                           cta_split_num=[1, 1], cta_order=[0, 1], instr_shape=[16, 8]),
+        operand_index=0, k_width=2),
 ])
 
 
@@ -249,9 +253,8 @@ def test_convert1d(M, src_layout, dst_layout, src_dim, dst_dim, is_bool, device)
         ttgl.store(y_ptr + offs_dst, y)
 
     torch.manual_seed(17)
-    x = torch.randint(0, 4, (M,), dtype=torch.int32, device=device)
+    x = torch.randint(0, 4, (M, ), dtype=torch.int32, device=device)
     x = x.to(torch.bool) if is_bool else x
-    y = torch.zeros((M,), dtype=torch.int32, device=device)
+    y = torch.zeros((M, ), dtype=torch.int32, device=device)
     kernel[(1, 1, 1)](x, y, M, src_layout, dst_layout, src_dim, dst_dim, num_warps=4)
     torch.testing.assert_close(y, x)
-
