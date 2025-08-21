@@ -256,4 +256,4 @@ def test_convert1d(M, src_layout, dst_layout, src_dim, dst_dim, is_bool, device)
     x = x.to(torch.bool) if is_bool else x
     y = torch.zeros((M, ), dtype=torch.int32, device=device)
     kernel[(1, )](x, y, M, src_layout, dst_layout, src_dim, dst_dim, num_warps=4)
-    torch.testing.assert_close(y, x)
+    torch.testing.assert_close(y, x.to(torch.int32))
