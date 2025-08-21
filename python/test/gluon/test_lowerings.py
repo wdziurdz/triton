@@ -245,17 +245,15 @@ def test_convert1d(M, src_layout, dst_layout, src_dim, dst_dim, is_bool, device)
     @gluon.jit
     def kernel(x_ptr, y_ptr, M: ttgl.constexpr, src_layout: ttgl.constexpr, dst_layout: ttgl.constexpr,
                src_dim: ttgl.constexpr, dst_dim: ttgl.constexpr):
-        src_slice = ttgl.SliceLayout(src_dim, src_layout)
-        dst_slice = ttgl.SliceLayout(dst_dim, dst_layout)
-        offs_src = ttgl.arange(0, M, layout=src_slice)
+        offs_src = ttgl.arange(0, M, layout=ttgl.SliceLayout(src_dim, src_layout))
         x = ttgl.load(x_ptr + offs_src)
-        y = ttgl.convert_layout(x, dst_slice)
-        offs_dst = ttgl.arange(0, M, layout=dst_slice)
+        y = ttgl.convert_layout(x, layout=ttgl.SliceLayout(dst_dim, dst_layout))
+        offs_dst = ttgl.arange(0, M, layout=ttgl.SliceLayout(dst_dim, dst_layout))
         ttgl.store(y_ptr + offs_dst, y)
 
     torch.manual_seed(17)
     x = torch.randint(0, 4, (M, ), dtype=torch.int32, device=device)
     x = x.to(torch.bool) if is_bool else x
     y = torch.zeros((M, ), dtype=torch.int32, device=device)
-    kernel[(1, 1, 1)](x, y, M, src_layout, dst_layout, src_dim, dst_dim, num_warps=4)
+    kernel[(1, )](x, y, M, src_layout, dst_layout, src_dim, dst_dim, num_warps=4)
     torch.testing.assert_close(y, x)
